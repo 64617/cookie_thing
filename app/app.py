@@ -40,7 +40,7 @@ def write_desc(idx: int, desc: str):
         count_count[bool(old_cnt)+1]+=1
     desc_cnt[idx] += 1
     heappush(pq, (desc_cnt[idx], idx))
-    p.joinpath(f'{cnt}.txt').write_text(desc)
+    p.joinpath(f'{old_cnt}.txt').write_text(desc)
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 1024*1024
