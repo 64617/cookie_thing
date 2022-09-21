@@ -9,7 +9,7 @@ const tags_e = document.getElementById('tag-dump')
 const id = +id_elem.innerHTML
 
 function appendtext(s) {
-	desc_elem.innerHTML += s+' ';
+	desc_elem.value += s+' ';
 	checkWordLen()
 }
 function addtag(s) {
@@ -45,8 +45,16 @@ function checkWordLen() {
 	const s = desc_elem.value.trim()
 	const words = s ? s.split(' ').length : 0; // just approx
 	wc_elem.innerHTML = words;
-	const valid = (words < 70);
-	submit_e.disabled = !valid;
+	const warning = (words > 49);
+	const too_much = (words > 99);
+	if (too_much) {
+		desc_elem.style.boxShadow = "0 0 4px 1px red"
+	} else if (warning) {
+		desc_elem.style.boxShadow = "0 0 4px 1px orange"
+	} else {
+		desc_elem.style.boxShadow = "inherit"
+	}
+	submit_e.disabled = too_much;
 }
 desc_elem.addEventListener('input', checkWordLen)
 
