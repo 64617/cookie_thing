@@ -6,8 +6,44 @@ const submit_e = document.getElementById('submit-button')
 const wc_elem = document.getElementById('word-count')
 const ts_elem = document.getElementById('timestamp')
 const tags_e = document.getElementById('tag-dump')
+const filter_e = document.getElementById('image-filter')
 const id = +id_elem.innerHTML
 let char_set;
+
+function setCookie(name,value,days) {
+    var expires = "";
+    if (days) {
+        var date = new Date();
+        date.setTime(date.getTime() + (days*24*60*60*1000));
+        expires = "; expires=" + date.toUTCString();
+    }
+    document.cookie = name + "=" + (value || "")  + expires + "; path=/";
+}
+function getCookie(name) {
+    var nameEQ = name + "=";
+    var ca = document.cookie.split(';');
+    for(var i=0;i < ca.length;i++) {
+        var c = ca[i];
+        while (c.charAt(0)==' ') c = c.substring(1,c.length);
+        if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length,c.length);
+    }
+    return null;
+}
+function eraseCookie(name) {   
+    document.cookie = name +'=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+}
+
+if (getCookie('image_filter') === null) {
+	setCookie('image_filter', 'any', 99)
+}
+const FILTER_LIST = ["any", "NSFW", "NSFL", "SAFE"]
+const filter_idx = FILTER_LIST.indexOf(getCookie('image_filter'))
+filter_e.options[filter_idx].selected = true;
+
+filter_e.onchange = e => {
+	setCookie('image_filter', e.currentTarget.value);
+	window.location.reload();
+}
 
 function appendtext(s) {
 	desc_elem.value += s+' ';

@@ -25,9 +25,8 @@ app.config['MAX_CONTENT_LENGTH'] = 1024*1024
 def merge_id_files_to_set(fnames: List[str]) -> Set[int]:
     s = set()
     for fname in fnames:
-        with open(fname) as f:
-            for w in f.readlines():
-                s.add(int(w))
+        for w in RATINGS_DIR.joinpath(fname).read_text().strip().split('\n'):
+            s.add(int(w))
     return s
 
 IMAGE_SETS = {
@@ -37,10 +36,9 @@ IMAGE_SETS = {
     ]),
     "NSFL": merge_id_files_to_set([
         'grimdark_image_ids.txt',
-        'grotesque_image_ids.txt',
+        'semi-grimdark_image_ids.txt',
     ]),
     "SAFE": merge_id_files_to_set([
-        'semi-grimdark_image_ids.txt',
         'safe_image_ids.txt',
         'suggestive_image_ids.txt',
     ])
@@ -109,7 +107,8 @@ def index():
     if 'uid' not in session: # There is nothing stopping someone from clearing cookies and spawning more sessions. 
         session['uid'] = uuid.uuid4()
     #
-    cnt,idx = iq.get_next()
+    typ = request.cookies.get("image_filter", "any")
+    cnt,idx = iq.get_next(typ)
     # this is dumb code.
     t = Timer(60*60, lambda: iq.check_if_missing(idx,cnt))
     t.start()
