@@ -5,7 +5,10 @@ from threading import Timer
 from flask import Flask,render_template,request,redirect,send_file,session
 from tqdm import tqdm
 from heapq import heappop, heappush
-pq = []
+from typing import List,Set,Tuple
+
+
+RATINGS_DIR = pathlib.Path('content_ratings')
 DESC_DIR = pathlib.Path('output_descriptions/')
 if not DESC_DIR.exists():
     print("WARNING: output directory does not exist. creating it.")
@@ -14,61 +17,95 @@ if not DESC_DIR.exists():
 BLAME_LOG = DESC_DIR.joinpath('blame.log')
 BLAME_FILE = open(BLAME_LOG, 'a') # STUPID
 
-desc_cnt = {}
-count_count = [0,0,0]
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'NOTE: IF YOU' #EVER MAKE CHANGES TO THE SESSION HANDLING CODE, YOU NEED TO CHANGE THIS (or purge all sessions somehow otherwise)
+app.config['MAX_CONTENT_LENGTH'] = 1024*1024
+
+
+def merge_id_files_to_set(fnames: List[str]) -> Set[int]:
+    s = set()
+    for fname in fnames:
+        with open('fname') as f:
+            for w in f.readlines():
+                s.add(int(w))
+    return s
+
+images_NSFW = merge_id_files_to_set([
+    'explicit_image_ids.txt',
+    'questionable_image_ids.txt',
+])
+images_NSFL = merge_id_files_to_set([
+    'grimdark_image_ids.txt',
+    'grotesque_image_ids.txt',
+])
+images_SAFE = merge_id_files_to_set([
+    'semi-grimdark_image_ids.txt',
+    'safe_image_ids.txt',
+    'suggestive_image_ids.txt',
+])
+
+
+class ImageQueue:
+    def __init__(self, image_ids: List[Tuple[int,int]]):
+        self.nsfw, self.nsfl, self.safe = [],[],[]
+        self.pq = []
+        self.count_count = [0,0,0]
+        self.desc_cnt = {}
+        for cnt,idx in image_ids:
+            heappush(self.pq, (cnt,idx))
+            self.count_count[bool(cnt) + (cnt>1)] += 1 
+            self.desc_cnt[idx] = cnt
+        self.REQUIRED = len(self.desc_cnt)*2
+    def get_next(self, typ: str="any") -> Tuple[int,int]:
+        if typ == 'any':
+            return heappop(self.pq)
+        raise NotImplementedError
+    def increment(self, idx: int) -> int:
+        old_cnt = self.desc_cnt[idx]
+        if old_cnt < 2:
+            self.count_count[old_cnt] -= 1
+            self.count_count[old_cnt+1] += 1
+        self.desc_cnt[idx] += 1
+        heappush(self.pq, (old_cnt+1, idx))
+        return old_cnt
+    def check_if_missing(self, idx: int, old_cnt: int):
+        if self.desc_cnt[idx] == old_cnt:
+            heappush(self.pq, (old_cnt,idx))
+    def progress_str(self) -> str:
+        progress = (self.count_count[1]+self.count_count[2]*2)/self.REQUIRED
+        return f'{progress:.9%}'
+
 with open('image_ids.txt') as f:
+    image_ids = []
     for id_s in tqdm(f.read().split('\n'), desc="Loading/creating description folders..."):
         if not id_s: continue
         p = DESC_DIR.joinpath(id_s)
         p.mkdir(exist_ok=True)
         # i hate this
         cnt,idx = len(list(p.iterdir())), int(id_s)
-        count_count[bool(cnt) + (cnt>1)] += 1
-        heappush(pq, (cnt,idx))
-        desc_cnt[idx] = cnt
-REQUIRED = len(desc_cnt)*2
-
-'''
-def real_desc_count(idx: int) -> int:
-    p = DESC_DIR.joinpath(str(idx))
-    p.mkdir(exist_ok=True)
-    return len(list(p.iterdir()))
-'''
+        image_ids.append((cnt,idx))
+    iq = ImageQueue(image_ids)
 
 def write_desc(idx: int, desc: str, uid: str):
     p = DESC_DIR.joinpath(str(idx))
-    old_cnt = desc_cnt[idx]
-    if old_cnt < 2: # lmao
-        count_count[bool(old_cnt)]-=1
-        count_count[bool(old_cnt)+1]+=1
-    desc_cnt[idx] += 1
-    heappush(pq, (desc_cnt[idx], idx))
+    old_cnt = iq.increment(idx)
     p.joinpath(f'{old_cnt}.txt').write_text(desc)
     BLAME_FILE.write(f'{idx}/{old_cnt}.txt -- {uid}\n')
     BLAME_FILE.flush()
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'NOTE: IF YOU' #EVER MAKE CHANGES TO THE SESSION HANDLING CODE, YOU NEED TO CHANGE THIS (or purge all sessions somehow otherwise)
-app.config['MAX_CONTENT_LENGTH'] = 1024*1024
-
-def readd_if_needed(idx,old_cnt):
-    if desc_cnt[idx] == old_cnt:
-        heappush(pq, (old_cnt,idx))
 @app.route("/")
 def index():
     # handle sessions
-    if 'uid' not in session:
+    if 'uid' not in session: # There is nothing stopping someone from clearing cookies and spawning more sessions. 
         session['uid'] = uuid.uuid4()
-        # There is nothing stopping someone from clearing cookies and spawning more sessions. 
     #
-    cnt,idx = heappop(pq)
+    cnt,idx = iq.get_next()
     # this is dumb code.
-    t = Timer(60*60, lambda: readd_if_needed(idx,cnt))
+    t = Timer(60*60, lambda: iq.check_if_missing(idx,cnt))
     t.start()
     # end of dumb code.
-    progress = (count_count[1]+count_count[2]*2)/REQUIRED
     return render_template('index.html', derpi_id=idx,
-       progress=f'{progress:.9%}')
+       progress=iq.progress_str())
 
 @app.route('/api/submit', methods=['POST'])
 def submit():
