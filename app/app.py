@@ -44,7 +44,7 @@ def write_desc(idx: int, desc: str, uid: str):
     desc_cnt[idx] += 1
     heappush(pq, (desc_cnt[idx], idx))
     p.joinpath(f'{old_cnt}.txt').write_text(desc)
-    BLAME_FILE.write(f'{old_cnt}.txt -- {uid}\n')
+    BLAME_FILE.write(f'{idx}/{old_cnt}.txt -- {uid}\n')
     BLAME_FILE.flush()
 
 app = Flask(__name__)
