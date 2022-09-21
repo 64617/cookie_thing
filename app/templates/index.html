@@ -1,0 +1,23 @@
+<head></head>
+<body>
+	<div id="error-desc" hidden></div>
+	<div style="display: inline-block">
+		<span>{{ derpi_id }}</span>
+		<span style="float: right">PROGRESS: {{ progress }}</span>
+		<br>
+		<img id="derpi-img"></img>
+	</div>
+	<br>
+	<form method="POST" action="/api/submit" style="display: inline-block; position:relative">
+		<textarea id="desc" name="desc" style="display: block; height:500"></textarea>
+		<!-- DUMB THINGS HERE -->
+		<textarea hidden name="idx" id="derpi-id">{{ derpi_id }}</textarea>
+		<input hidden type="number" id="timestamp" name="timestamp">
+		<!-- END DUMB THINGS -->
+		<br>
+		<br>
+		<div id="word-count"></div>
+		<button style="position: absolute; bottom: 10px; right: 10px" type="submit" id="submit-button" >Submit Description</button>
+	</form>
+	<script src="/static/index.js">please enable js</script>
+</body>
