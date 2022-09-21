@@ -5,6 +5,7 @@
 <body>
 	<h3> EXPERIMENTAL IMAGE CAPTIONING SERVICE </h3>
 	<h5> Read <a href="https://docs.google.com/document/d/1mtTEKggt1PzCAviOu_AIZhgYuPvQP_ex-loVXSwspaY/edit">THIS GUIDE</a> if you haven't used this before </h5>
+	<small style="color:grey; font-size:8px">"groups of" button coming soon</small>
 	<br>
 	<hr>
 	<br>
@@ -16,8 +17,9 @@
 		<img id="derpi-img"></img>
 	</div>
 	<br>
+	<div id="tag-dump"></div>
 	<form method="POST" action="/api/submit" style="display: inline-block; position:relative">
-		<textarea id="desc" name="desc" style="display: block; height:500"></textarea>
+		<textarea id="desc" name="desc" style="display: block; height:8em"></textarea>
 		<!-- DUMB THINGS HERE -->
 		<textarea hidden name="idx" id="derpi-id">{{ derpi_id }}</textarea>
 		<input hidden type="number" id="timestamp" name="timestamp">
