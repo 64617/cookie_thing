@@ -8,6 +8,7 @@ cd app
 uwsgi --ini uwsgi.ini
 ```
 ## docker
+##### don't actually try using this because it's out of date
 In `docker-compose.yml`, replace 
 ```
 device: /REPLACE_ME/PATH/TO/output_descriptions
