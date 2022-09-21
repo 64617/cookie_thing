@@ -1,7 +1,8 @@
 import pathlib
 import time
+import uuid
 from threading import Timer
-from flask import Flask,render_template,request,redirect
+from flask import Flask,render_template,request,redirect,send_file,session
 from tqdm import tqdm
 from heapq import heappop, heappush
 pq = []
@@ -10,6 +11,8 @@ if not DESC_DIR.exists():
     print("WARNING: output directory does not exist. creating it.")
     print("Be especially concerned if you are running this in docker.")
     DESC_DIR.mkdir()
+BLAME_LOG = DESC_DIR.joinpath('blame.log')
+BLAME_FILE = open(BLAME_LOG, 'a') # STUPID
 
 desc_cnt = {}
 count_count = [0,0,0]
@@ -32,7 +35,7 @@ def real_desc_count(idx: int) -> int:
     return len(list(p.iterdir()))
 '''
 
-def write_desc(idx: int, desc: str):
+def write_desc(idx: int, desc: str, uid: str):
     p = DESC_DIR.joinpath(str(idx))
     old_cnt = desc_cnt[idx]
     if old_cnt < 2: # lmao
@@ -41,8 +44,11 @@ def write_desc(idx: int, desc: str):
     desc_cnt[idx] += 1
     heappush(pq, (desc_cnt[idx], idx))
     p.joinpath(f'{old_cnt}.txt').write_text(desc)
+    BLAME_FILE.write(f'{old_cnt}.txt -- {uid}\n')
+    BLAME_FILE.flush()
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'NOTE: IF YOU' #EVER MAKE CHANGES TO THE SESSION HANDLING CODE, YOU NEED TO CHANGE THIS (or purge all sessions somehow otherwise)
 app.config['MAX_CONTENT_LENGTH'] = 1024*1024
 
 def readd_if_needed(idx,old_cnt):
@@ -50,6 +56,11 @@ def readd_if_needed(idx,old_cnt):
         heappush(pq, (old_cnt,idx))
 @app.route("/")
 def index():
+    # handle sessions
+    if 'uid' not in session:
+        session['uid'] = uuid.uuid4()
+        # There is nothing stopping someone from clearing cookies and spawning more sessions. 
+    #
     cnt,idx = heappop(pq)
     # this is dumb code.
     t = Timer(60*60, lambda: readd_if_needed(idx,cnt))
@@ -61,13 +72,22 @@ def index():
 
 @app.route('/api/submit', methods=['POST'])
 def submit():
+    # sessions are cryptographically signed and should not be editable
+    uid = session.get('uid', None)
+    if uid is None:
+        return 'SESSION MISSING', 403 
+    #
     idx,desc,ts = int(request.form['idx']), request.form['desc'],int(request.form['timestamp'])
     if time.time()-ts > 60*59:
         return 'FORM EXPIRED',500
     if not desc or len(desc) > 1000:
         return 'RESPONSE TOO SHORT / LONG', 500
-    write_desc(idx, desc)
+    write_desc(idx, desc, uid)
     return redirect('/', code=302)
+
+@app.route('/super/secret/endpoint')
+def super_secret_endpoint():
+    return send_file("./output_backups/captions-latest.tar.gz")
 
 if __name__ == '__main__':
     app.debug = True;
