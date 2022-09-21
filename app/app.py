@@ -55,10 +55,9 @@ def index():
     t = Timer(60*60, lambda: readd_if_needed(idx,cnt))
     t.start()
     # end of dumb code.
+    progress = (count_count[1]+count_count[2]*2)/REQUIRED
     return render_template('index.html', derpi_id=idx,
-       progress='{:0.9f}'.format(100*(
-         (count_count[1]+count_count[2]*2)/REQUIRED
-    )))
+       progress=f'{progress:.9%}')
 
 @app.route('/api/submit', methods=['POST'])
 def submit():
