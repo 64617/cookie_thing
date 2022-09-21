@@ -17,4 +17,6 @@ services:
       - output-data:/app/output_descriptions
     environment:
       - FLASK_ENV=production
+    ports:
+      - 5000:5000
 
