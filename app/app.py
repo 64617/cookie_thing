@@ -25,7 +25,7 @@ app.config['MAX_CONTENT_LENGTH'] = 1024*1024
 def merge_id_files_to_set(fnames: List[str]) -> Set[int]:
     s = set()
     for fname in fnames:
-        with open('fname') as f:
+        with open(fname) as f:
             for w in f.readlines():
                 s.add(int(w))
     return s
