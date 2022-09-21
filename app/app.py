@@ -30,47 +30,57 @@ def merge_id_files_to_set(fnames: List[str]) -> Set[int]:
                 s.add(int(w))
     return s
 
-images_NSFW = merge_id_files_to_set([
-    'explicit_image_ids.txt',
-    'questionable_image_ids.txt',
-])
-images_NSFL = merge_id_files_to_set([
-    'grimdark_image_ids.txt',
-    'grotesque_image_ids.txt',
-])
-images_SAFE = merge_id_files_to_set([
-    'semi-grimdark_image_ids.txt',
-    'safe_image_ids.txt',
-    'suggestive_image_ids.txt',
-])
+IMAGE_SETS = {
+    "NSFW": merge_id_files_to_set([
+        'explicit_image_ids.txt',
+        'questionable_image_ids.txt',
+    ]),
+    "NSFL": merge_id_files_to_set([
+        'grimdark_image_ids.txt',
+        'grotesque_image_ids.txt',
+    ]),
+    "SAFE": merge_id_files_to_set([
+        'semi-grimdark_image_ids.txt',
+        'safe_image_ids.txt',
+        'suggestive_image_ids.txt',
+    ])
+}
+TYPE_ORDER = ["NSFL", "NSFW", "SAFE"]
 
 
+import random
 class ImageQueue:
     def __init__(self, image_ids: List[Tuple[int,int]]):
-        self.nsfw, self.nsfl, self.safe = [],[],[]
-        self.pq = []
+        self.queues = {k:[] for k in IMAGE_SETS}
         self.count_count = [0,0,0]
         self.desc_cnt = {}
+        self.img_types = {}
         for cnt,idx in image_ids:
-            heappush(self.pq, (cnt,idx))
-            self.count_count[bool(cnt) + (cnt>1)] += 1 
+            for typ in TYPE_ORDER:
+                if idx in IMAGE_SETS[typ]:
+                    heappush(self.queues[typ], (cnt,idx))
+                    self.img_types[idx] = typ
+                    break # only 1 queue should have each id
+            self.count_count[bool(cnt) + (cnt>1)] += 1
             self.desc_cnt[idx] = cnt
         self.REQUIRED = len(self.desc_cnt)*2
     def get_next(self, typ: str="any") -> Tuple[int,int]:
-        if typ == 'any':
-            return heappop(self.pq)
-        raise NotImplementedError
+        if typ == 'any': typ = random.choice(TYPE_ORDER)
+        assert typ in self.queues
+        return heappop(self.queues[typ])
+    def _push(self, idx: int, cnt: int):
+        heappush(self.queues[self.img_types[idx]], (cnt, idx))
     def increment(self, idx: int) -> int:
         old_cnt = self.desc_cnt[idx]
         if old_cnt < 2:
             self.count_count[old_cnt] -= 1
             self.count_count[old_cnt+1] += 1
         self.desc_cnt[idx] += 1
-        heappush(self.pq, (old_cnt+1, idx))
+        self._push(idx, old_cnt+1)
         return old_cnt
     def check_if_missing(self, idx: int, old_cnt: int):
         if self.desc_cnt[idx] == old_cnt:
-            heappush(self.pq, (old_cnt,idx))
+            self._push(idx, old_cnt)
     def progress_str(self) -> str:
         progress = (self.count_count[1]+self.count_count[2]*2)/self.REQUIRED
         return f'{progress:.9%}'
