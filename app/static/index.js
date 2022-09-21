@@ -29,7 +29,7 @@ function checkWordLen() {
 	const s = desc_elem.value.trim()
 	const words = s ? s.split(' ').length : 0; // just approx
 	wc_elem.innerHTML = words;
-	const valid = (words < 77);
+	const valid = (words < 70);
 	submit_e.disabled = !valid;
 }
 desc_elem.addEventListener('input', checkWordLen)
