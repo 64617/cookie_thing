@@ -7,12 +7,18 @@ const wc_elem = document.getElementById('word-count')
 const ts_elem = document.getElementById('timestamp')
 const tags_e = document.getElementById('tag-dump')
 const id = +id_elem.innerHTML
+let char_set;
 
 function appendtext(s) {
 	desc_elem.value += s+' ';
 	checkWordLen()
 }
 function addtag(s) {
+	if (char_set.has(s)) {
+		s = s.split(' ')
+			.map(w => w[0].toUpperCase() + w.substr(1))
+			.join(" ");
+	}
 	const linked_tag = document.createElement('a')
 	linked_tag.href = '#'
 	linked_tag.innerHTML = s;
@@ -23,8 +29,17 @@ function addtag(s) {
 	tags_e.appendChild(linked_tag)
 	linked_tag.insertAdjacentHTML('afterend', '&nbsp;')
 }
+async function get_characters() {
+	if (localStorage.getItem('char_list') === null) {
+		const res = await fetch('/static/character_tags.txt');
+		const txt = await res.text();
+		localStorage.setItem('char_list', txt.trim());
+	}
+	return localStorage.getItem('char_list').split('\n')
+}
 async function showImage() {
 	try {
+	char_set = new Set(await get_characters())
   const res = await fetch(`https://derpibooru.org/api/v1/json/images/${id}`)
 	const json = await res.json();
 	const url = json.image.representations.medium;
