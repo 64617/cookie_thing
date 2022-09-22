@@ -63,7 +63,7 @@ function addtag(s) {
 		appendtext(s)
 	}
 	tags_e.appendChild(linked_tag)
-	linked_tag.insertAdjacentHTML('afterend', '&nbsp;')
+	linked_tag.insertAdjacentHTML('afterend', ' ')
 }
 async function get_characters() {
 	if (localStorage.getItem('char_list') === null) {
