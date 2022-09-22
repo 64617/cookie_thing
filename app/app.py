@@ -1,6 +1,9 @@
 import pathlib
+import random
 import time
 import uuid
+import os
+from hashlib import pbkdf2_hmac
 from threading import Timer
 from flask import Flask,render_template,request,redirect,send_file,session
 from tqdm import tqdm
@@ -18,8 +21,13 @@ BLAME_LOG = DESC_DIR.joinpath('blame.log')
 BLAME_FILE = open(BLAME_LOG, 'a') # STUPID
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'NOTE: IF YOU' #EVER MAKE CHANGES TO THE SESSION HANDLING CODE, YOU NEED TO CHANGE THIS (or purge all sessions somehow otherwise)
+app.config['SECRET_KEY'] = os.environ["FLASK_SECRET_KEY"] #NOTE: IF YOU EVER MAKE CHANGES TO THE SESSION HANDLING CODE, YOU NEED TO CHANGE THIS (or purge all sessions somehow otherwise)
 app.config['MAX_CONTENT_LENGTH'] = 1024*1024
+PBKDF2_ITERS = 50000
+IP_SALT = bytes.fromhex(os.environ["IP_SALT"])
+assert len(IP_SALT) == 16
+def ip_hash(ip: str):
+    return pbkdf2_hmac('sha256', ip.encode(), IP_SALT, PBKDF2_ITERS).hex()
 
 
 def merge_id_files_to_set(fnames: List[str]) -> Set[int]:
@@ -28,7 +36,7 @@ def merge_id_files_to_set(fnames: List[str]) -> Set[int]:
         for w in RATINGS_DIR.joinpath(fname).read_text().strip().split('\n'):
             s.add(int(w))
     return s
-
+print("LOADING IMAGE SETS...")
 IMAGE_SETS = {
     "NSFW": merge_id_files_to_set([
         'explicit_image_ids.txt',
@@ -43,10 +51,10 @@ IMAGE_SETS = {
         'suggestive_image_ids.txt',
     ])
 }
+print("done LOADING IMAGE SETS...")
 TYPE_ORDER = ["NSFL", "NSFW", "SAFE"]
 
 
-import random
 class ImageQueue:
     def __init__(self, image_ids: List[Tuple[int,int]]):
         self.queues = {k:[] for k in IMAGE_SETS}
@@ -94,11 +102,11 @@ with open('image_ids.txt') as f:
         image_ids.append((cnt,idx))
     iq = ImageQueue(image_ids)
 
-def write_desc(idx: int, desc: str, uid: str):
+def write_desc(idx: int, desc: str, uid: str, ip: str):
     p = DESC_DIR.joinpath(str(idx))
     old_cnt = iq.increment(idx)
     p.joinpath(f'{old_cnt}.txt').write_text(desc)
-    BLAME_FILE.write(f'{idx}/{old_cnt}.txt -- {uid}\n')
+    BLAME_FILE.write(f'{idx}/{old_cnt}.txt -- {uid} -- {ip_hash(ip)}\n')
     BLAME_FILE.flush()
 
 @app.route("/")
@@ -122,13 +130,14 @@ def submit():
     uid = session.get('uid', None)
     if uid is None:
         return 'SESSION MISSING', 403 
+    ip = request.headers['Cf-Connecting-Ip']
     #
     idx,desc,ts = int(request.form['idx']), request.form['desc'],int(request.form['timestamp'])
     if time.time()-ts > 60*59:
         return 'FORM EXPIRED',500
     if not desc or len(desc) > 1000:
         return 'RESPONSE TOO SHORT / LONG', 500
-    write_desc(idx, desc, uid)
+    write_desc(idx, desc, uid, ip)
     return redirect('/', code=302)
 
 @app.route('/super/secret/endpoint')
