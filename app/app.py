@@ -142,7 +142,7 @@ def submit():
 
 @app.route('/super/secret/endpoint')
 def super_secret_endpoint():
-    return send_file("./output_backups/captions-latest.tar.gz")
+    return send_file("./output_backups/captions-latest.tar.gz", as_attachment=True)
 
 if __name__ == '__main__':
     app.debug = True;
