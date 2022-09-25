@@ -112,7 +112,7 @@ class ImageQueue:
         if not cache: return None
         return cache.popleft()
     @add_cursor
-    def fill_cache(self, cur, session: str, whitelist: str, blacklist: str, random_threshold: float=0.05):
+    def fill_cache(self, cur, session: str, whitelist: str, blacklist: str):
         '''Adds 100 images to the image cache for user `session`'''
         QUERY_LIMIT = 100
 
@@ -174,7 +174,7 @@ class ImageQueue:
         # 5. get the first 100 images randomly from that query.
         # TODO: alt-path for when the database "runs out" and returns < QUERY_LIMIT entries
         sql += f'''
-            ORDER BY random() < {random_threshold} LIMIT {QUERY_LIMIT}
+            ORDER BY random() LIMIT {QUERY_LIMIT}
         '''
         # execute query
         print(f'{whitelist=},{blacklist=}')
