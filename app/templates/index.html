@@ -7,11 +7,32 @@
 	<h5> Read <a href="https://docs.google.com/document/d/1mtTEKggt1PzCAviOu_AIZhgYuPvQP_ex-loVXSwspaY/edit">THIS GUIDE</a> if you haven't used this before </h5>
 	<small style="color:grey; font-size:8px">"groups of" button coming soon</small>
 	<select name="image-filter" id="image-filter">
-		<option value="any">All (default)</option>
+		<option value="SAFE">Safe+Suggestive only (default)</option>
+		<option value="any">Everything</option>
 		<option value="NSFW">NSFW-only</option>
 		<option value="NSFL">100% Grotesque/Grimdark</option>
-		<option value="SAFE">Safe+Suggestive only</option>
+		<option value="PONY">Anything pony</option>
+		<option value="custom">Custom</option>
 	</select>
+	<span id="filter-menu-toggle" style="visibility:hidden">▶</span>
+	<div id="filter-menu" hidden>
+		<div style="display:flex">
+			<div>
+				<label for="superlist">Required tags (all)</label>
+				<textarea id="superlist" name="superlist" placeholder="[this box doesn't work yet]"></textarea>
+			</div>
+			<div>
+				<label for="whitelist">Permitted tags (any)</label>
+				<textarea id="whitelist" name="whitelist" placeholder="applejack, unicorn, scenery porn"></textarea>
+			</div>
+			<div>
+				<label for="blacklist">Purged tags</label>
+				<textarea id="blacklist" name="blacklist" placeholder="scat, vore, eqg"></textarea>
+			</div>
+			<button id="filter-menu-button" style="margin-top:auto">use filter</button>
+		</div>
+		<p>Derpi-like arbitrary expressions will NOT work here; please use a simple list of tags</p>
+	</div>
 	<br>
 	<hr>
 	<br>

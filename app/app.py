@@ -1,126 +1,227 @@
 import pathlib
-import random
+import psycopg
 import time
 import uuid
 import os
-from hashlib import pbkdf2_hmac
+import json
+from subprocess import check_call
 from threading import Timer
-from flask import Flask,render_template,request,redirect,send_file,session
+from hashlib import pbkdf2_hmac
+from collections import defaultdict, deque
+from flask import Flask,render_template,request,redirect,send_file,session,make_response
 from tqdm import tqdm
-from heapq import heappop, heappush
 from typing import List,Set,Tuple
-
-
-RATINGS_DIR = pathlib.Path('content_ratings')
-DESC_DIR = pathlib.Path('output_descriptions/')
-if not DESC_DIR.exists():
-    print("WARNING: output directory does not exist. creating it.")
-    print("Be especially concerned if you are running this in docker.")
-    DESC_DIR.mkdir()
-BLAME_LOG = DESC_DIR.joinpath('blame.log')
-BLAME_FILE = open(BLAME_LOG, 'a') # STUPID
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ["FLASK_SECRET_KEY"] #NOTE: IF YOU EVER MAKE CHANGES TO THE SESSION HANDLING CODE, YOU NEED TO CHANGE THIS (or purge all sessions somehow otherwise)
 app.config['MAX_CONTENT_LENGTH'] = 1024*1024
+
 PBKDF2_ITERS = 50000
 IP_SALT = bytes.fromhex(os.environ["IP_SALT"])
 assert len(IP_SALT) == 16
 def ip_hash(ip: str):
     return pbkdf2_hmac('sha256', ip.encode(), IP_SALT, PBKDF2_ITERS).hex()
 
+# Connect to the database
+DB_CONN = psycopg.connect(
+    host = 'caption-db',
+    port = 5432,
+    dbname   = os.environ.get("POSTGRES_DATABASE", "derpibooru"),
+    user     = os.environ.get("POSTGRES_USERNAME", "derpibooru_user"),
+    password = os.environ["POSTGRES_PASSWORD"],
+    autocommit=True
+)
 
-def merge_id_files_to_set(fnames: List[str]) -> Set[int]:
-    s = set()
-    for fname in fnames:
-        for w in RATINGS_DIR.joinpath(fname).read_text().strip().split('\n'):
-            s.add(int(w))
-    return s
-print("LOADING IMAGE SETS...")
-IMAGE_SETS = {
-    "NSFW": merge_id_files_to_set([
-        'explicit_image_ids.txt',
-        'questionable_image_ids.txt',
-    ]),
-    "NSFL": merge_id_files_to_set([
-        'grimdark_image_ids.txt',
-        'semi-grimdark_image_ids.txt',
-    ]),
-    "SAFE": merge_id_files_to_set([
-        'safe_image_ids.txt',
-        'suggestive_image_ids.txt',
-    ])
-}
-print("done LOADING IMAGE SETS...")
-TYPE_ORDER = ["NSFL", "NSFW", "SAFE"]
+def add_cursor(f):
+    def inner(self, *args, **kwargs):
+        with DB_CONN.cursor() as cur:
+            return f(self, cur, *args, **kwargs)
+    return inner
 
+with DB_CONN.cursor() as cur:
+    res = cur.execute('''SELECT COUNT(id) FROM images''')
+    REQUIRED = res.fetchone()[0]*2 # pyright: ignore
+
+class DurationOf:
+    def __init__(self, title: str): self.s = title
+    def __enter__(self): self.start = time.time()
+    def __exit__(self, *_):
+        delta = time.time()-self.start
+        print(f'{self.s} -- took {delta} seconds')
 
 class ImageQueue:
-    def __init__(self, image_ids: List[Tuple[int,int]]):
-        self.queues = {k:[] for k in IMAGE_SETS}
-        self.count_count = [0,0,0]
-        self.desc_cnt = {}
-        self.img_types = {}
-        for cnt,idx in image_ids:
-            for typ in TYPE_ORDER:
-                if idx in IMAGE_SETS[typ]:
-                    heappush(self.queues[typ], (cnt,idx))
-                    self.img_types[idx] = typ
-                    break # only 1 queue should have each id
-            self.count_count[bool(cnt) + (cnt>1)] += 1
-            self.desc_cnt[idx] = cnt
-        self.REQUIRED = len(self.desc_cnt)*2
-    def get_next(self, typ: str="any") -> Tuple[int,int]:
-        if typ == 'any': typ = random.choice(TYPE_ORDER)
-        assert typ in self.queues
-        return heappop(self.queues[typ])
-    def _push(self, idx: int, cnt: int):
-        heappush(self.queues[self.img_types[idx]], (cnt, idx))
-    def increment(self, idx: int) -> int:
-        old_cnt = self.desc_cnt[idx]
-        if old_cnt < 2:
-            self.count_count[old_cnt] -= 1
-            self.count_count[old_cnt+1] += 1
-        self.desc_cnt[idx] += 1
-        self._push(idx, old_cnt+1)
-        return old_cnt
-    def check_if_missing(self, idx: int, old_cnt: int):
-        if self.desc_cnt[idx] == old_cnt:
-            self._push(idx, old_cnt)
+    def __init__(self):
+        self.cached_ids = defaultdict(deque)
+        self.cached_filters = defaultdict(str)
+        self.cached_progress = (time.time(), self.get_progress())
+
     def progress_str(self) -> str:
-        progress = (self.count_count[1]+self.count_count[2]*2)/self.REQUIRED
-        return f'{progress:.9%}'
+        '''
+        if time.time()-self.cached_progress[0] > 300:
+            self.cached_progress = (time.time(), self.get_progress())
+        return f'{self.cached_progress[1]:.9%}'
+        '''
+        return f'{self.get_progress():.9%}'
 
-with open('image_ids.txt') as f:
-    image_ids = []
-    for id_s in tqdm(f.read().split('\n'), desc="Loading/creating description folders..."):
-        if not id_s: continue
-        p = DESC_DIR.joinpath(id_s)
-        p.mkdir(exist_ok=True)
-        # i hate this
-        cnt,idx = len(list(p.iterdir())), int(id_s)
-        image_ids.append((cnt,idx))
-    iq = ImageQueue(image_ids)
+    @add_cursor
+    def get_progress(self, cur=...) -> float:
+        '''query the DB for how close we are to reaching
+        2 captions per image'''
+        with DurationOf('get_progress()'):
+            sql = '''
+                SELECT COUNT(image_id) FROM image_prompts
+                WHERE prompt_id = ANY(ARRAY[0,1])
+            '''
+            complete = cur.execute(sql).fetchone()[0] # pyright: ignore
+        return complete/REQUIRED
 
-def write_desc(idx: int, desc: str, uid: str, ip: str):
-    p = DESC_DIR.joinpath(str(idx))
-    old_cnt = iq.increment(idx)
-    p.joinpath(f'{old_cnt}.txt').write_text(desc)
-    BLAME_FILE.write(f'{idx}/{old_cnt}.txt -- {uid} -- {ip_hash(ip)}\n')
-    BLAME_FILE.flush()
+    @add_cursor
+    def write_desc(self, cur, idx: int, desc: str, uid: str, ip: str):
+        # use a transaction to ensure atomic prompt_id counting
+        with DB_CONN.transaction():
+            # get number of prompts so far
+            res = cur.execute('''
+                SELECT COUNT(prompt_id) FROM image_prompts
+                WHERE image_id = %s
+            ''', (idx,))
+            new_pid = res.fetchone()[0] # pyright: ignore
+
+            # add new prompt
+            res = cur.execute('''
+                INSERT INTO image_prompts
+                (ip_hash, session_id, image_id, prompt_text, prompt_id)
+                VALUES (%s,%s,%s,%s,%s)
+            ''', (ip_hash(ip), uid, idx, desc, new_pid))
+
+    def get_next(self, session: str, superlist: str, whitelist: str, blacklist: str):
+        print('TODO:', superlist)
+        expected_filter = whitelist+blacklist
+        # if a user changed their filter, delete their image cache.
+        if self.cached_filters[session] != expected_filter:
+            self.cached_ids[session] = deque()
+            self.cached_filters[session] = expected_filter
+
+        # if the user image cache is about to run out, replenish it
+        cache = self.cached_ids[session]
+        if len(cache) < 2:
+            with DurationOf('fill_cache()'):
+                self.fill_cache(session, whitelist, blacklist) # pyright: ignore
+                print(cache)
+        
+        # pop from cache
+        if not cache: return None
+        return cache.popleft()
+    @add_cursor
+    def fill_cache(self, cur, session: str, whitelist: str, blacklist: str, random_threshold: float=0.05):
+        '''Adds 100 images to the image cache for user `session`'''
+        QUERY_LIMIT = 100
+
+        # SQL SELECT query with 6 parts:
+        sql = 'WITH'
+
+        # 0. predefine variables (blacklist)
+        if blacklist:
+            sql += '''
+            bl as (
+              SELECT id FROM tags
+              WHERE name = ANY(%s)
+            ),
+            '''
+
+        # 1. Begin query on image_taggings table for distinct image_ids
+        sql += '''
+            possible_ids as (
+                SELECT DISTINCT ON (image_id) image_id FROM image_taggings
+        '''
+
+        # 2. filter for tags in whitelist
+        if whitelist:
+            sql += '''
+                WHERE tag_id IN (
+                  SELECT id from tags
+                    WHERE name = ANY(%s)
+                )
+            '''
+
+        # 3. filter against images that have prompts already
+        # TODO: figure out when to start filtering against prompt_id > 0
+        word = 'AND' if whitelist or blacklist else 'WHERE'
+        sql += f'''
+                {word} image_id NOT IN (
+                  SELECT image_id FROM image_prompts
+                )
+            )
+        '''
+
+        # 4. filter against tags from blacklist
+        # this entire query is basically a waste of time if there's no blacklist.
+        sql += '''
+            SELECT image_id from image_taggings
+            WHERE image_id IN (
+              SELECT image_id FROM possible_ids
+            )
+            GROUP BY image_id
+        '''
+        if blacklist: sql += '''
+            HAVING bool_and(tag_id NOT IN (
+              SELECT id FROM bl
+            ))
+            '''
+        else: sql += '''
+            HAVING TRUE
+        '''
+
+        # 5. get the first 100 images randomly from that query.
+        # TODO: alt-path for when the database "runs out" and returns < QUERY_LIMIT entries
+        sql += f'''
+            ORDER BY random() < {random_threshold} LIMIT {QUERY_LIMIT}
+        '''
+        # execute query
+        print(f'{whitelist=},{blacklist=}')
+        print(sql)
+        res = cur.execute(sql, tuple(
+            ls.split(',')
+            for ls in (blacklist, whitelist)
+            if ls
+        ))
+        # add result to cached ID list
+        self.cached_ids[session].extend(
+            (t[0] for t in res.fetchall())
+        )
+
+iq = ImageQueue()
+
+DEFAULT_FILTERS = {
+    'any': ('', '', ''),
+    'NSFW': ('', 'questionable,explicit', ''),
+    'NSFL': ('', 'grimdark,semi-grimdark', 'safe'),
+    'SAFE': ('', 'safe,suggestive', ''),
+    'PONY': ('', 'pony', 'eqg,human,anthro')
+}
 
 @app.route("/")
 def index():
     # handle sessions
     if 'uid' not in session: # There is nothing stopping someone from clearing cookies and spawning more sessions. 
         session['uid'] = uuid.uuid4()
-    #
+
+    # get whitelist/blacklist from cookies
     typ = request.cookies.get("image_filter", "any")
-    cnt,idx = iq.get_next(typ)
-    # this is dumb code.
-    t = Timer(60*60, lambda: iq.check_if_missing(idx,cnt))
-    t.start()
-    # end of dumb code.
+    if typ == 'custom':
+        superlist = request.cookies.get("superlist", "")
+        whitelist = request.cookies.get("whitelist", "")
+        blacklist = request.cookies.get("blacklist", "")
+    else:
+        superlist,whitelist,blacklist = DEFAULT_FILTERS[typ]
+    
+    # return front page with image
+    idx = iq.get_next(str(session), superlist, whitelist, blacklist)
+    if idx is None:
+        resp = make_response('Could not find any images matching your query. (possible bug?)', 500)
+        resp.delete_cookie('superlist')
+        resp.delete_cookie('whitelist')
+        resp.delete_cookie('blacklist')
+        return resp
     return render_template('index.html', derpi_id=idx,
        progress=iq.progress_str())
 
@@ -137,12 +238,36 @@ def submit():
         return 'FORM EXPIRED',500
     if not desc or len(desc) > 1000:
         return 'RESPONSE TOO SHORT / LONG', 500
-    write_desc(idx, desc, uid, ip)
+    iq.write_desc(idx, desc, uid, ip) # pyright: ignore
     return redirect('/', code=302)
+
+BACKUP_DIR = pathlib.Path('/backups/')
+BACKUP_DIR.mkdir(exist_ok=True)
+BACKUP_FILE = BACKUP_DIR.joinpath('captions-latest.json')
 
 @app.route('/super/secret/endpoint')
 def super_secret_endpoint():
-    return send_file("./output_backups/captions-latest.tar.gz", as_attachment=True)
+    return send_file(str(BACKUP_FILE), as_attachment=True)
+
+def create_backup():
+    # call this recursively every 6 hours
+    Timer(60*60*6, create_backup).start()
+    # create JSON dump cache
+    with DB_CONN.cursor() as cur, DurationOf("JSON dump"):
+        res = cur.execute('SELECT * FROM image_prompts')
+        captions = [
+            dict(zip(
+                ('ip_hash', 'session_id', 'prompt_text', 'prompt_id', 'image_id'),
+                row,
+            )) for row in res.fetchall()
+        ]
+        with BACKUP_FILE.open('w') as f:
+            json.dump(captions,f)
+create_backup()
+
+# note: these json backups are provided for mere conveinence.
+# Actual backup process exists to store pg_dump outputs every x hours.
+
 
 if __name__ == '__main__':
     app.debug = True;

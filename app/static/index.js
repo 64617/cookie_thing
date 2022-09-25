@@ -1,3 +1,12 @@
+function sanitizeTagList(s) {
+	return s
+		.replace(/\s+/g,' ') // remove extra whitespaces
+		.replace(/^\s+|\s+$/,'') 
+		.replace(/^,|,$/g,'')  // extra: remove trailing/starting commas
+		.replace(', ', ',');
+}
+  
+
 const im_elem = document.getElementById('derpi-img')
 const id_elem = document.getElementById('derpi-id')
 const desc_elem = document.getElementById('desc')
@@ -7,6 +16,12 @@ const wc_elem = document.getElementById('word-count')
 const ts_elem = document.getElementById('timestamp')
 const tags_e = document.getElementById('tag-dump')
 const filter_e = document.getElementById('image-filter')
+const custom_filter_e = document.getElementById('filter-menu')
+const custom_filter_button_e = document.getElementById('filter-menu-button')
+const custom_filter_toggle_e = document.getElementById('filter-menu-toggle')
+const superlist_e = document.getElementById('superlist')
+const whitelist_e = document.getElementById('whitelist')
+const blacklist_e = document.getElementById('blacklist')
 const id = +id_elem.innerHTML
 let char_set;
 
@@ -19,7 +34,7 @@ function setCookie(name,value,days) {
     }
     document.cookie = name + "=" + (value || "")  + expires + "; path=/";
 }
-function getCookie(name) {
+function getCookie(name, otherwise=null) {
     var nameEQ = name + "=";
     var ca = document.cookie.split(';');
     for(var i=0;i < ca.length;i++) {
@@ -27,7 +42,7 @@ function getCookie(name) {
         while (c.charAt(0)==' ') c = c.substring(1,c.length);
         if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length,c.length);
     }
-    return null;
+    return otherwise;
 }
 function eraseCookie(name) {   
     document.cookie = name +'=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
@@ -36,14 +51,62 @@ function eraseCookie(name) {
 if (getCookie('image_filter') === null) {
 	setCookie('image_filter', 'any', 99)
 }
-const FILTER_LIST = ["any", "NSFW", "NSFL", "SAFE"]
-const filter_idx = FILTER_LIST.indexOf(getCookie('image_filter'))
+const image_filter = getCookie('image_filter')
+const FILTER_LIST = ["SAFE", "any", "NSFW", "NSFL", "PONY", "custom"]
+const filter_idx = FILTER_LIST.indexOf(image_filter)
 filter_e.options[filter_idx].selected = true;
 
+custom_filter_toggle_e.onclick = () => {
+	const opening = custom_filter_e.hidden;
+	custom_filter_e.hidden = !opening;
+	custom_filter_toggle_e.innerHTML = opening ? '▼' : '▶'
+}
+function loadCustomFilter(hide=true) {
+	custom_filter_toggle_e.style.visibility = 'visible'
+	superlist_e.value = getCookie('superlist','').replace(',', ', ')
+	whitelist_e.value = getCookie('whitelist','').replace(',', ', ')
+	blacklist_e.value = getCookie('blacklist','').replace(',', ', ')
+	if (!hide) {
+		custom_filter_e.hidden = false;
+		custom_filter_toggle_e.innerHTML = '▼'
+	}
+}
+if (image_filter === "custom") {
+	loadCustomFilter()
+}
 filter_e.onchange = e => {
-	setCookie('image_filter', e.currentTarget.value);
+	if (e.currentTarget.value === 'custom') {
+		loadCustomFilter(hide=false)
+	} else {
+		setCookie('image_filter', e.currentTarget.value);
+		window.location.reload();
+	}
+}
+custom_filter_button_e.onclick = () => {
+	const [slist,wlist,blist] = [superlist_e.value, whitelist_e.value, blacklist_e.value]
+	setCookie('superlist', sanitizeTagList(slist))
+	setCookie('whitelist', sanitizeTagList(wlist))
+	setCookie('blacklist', sanitizeTagList(blist))
+	setCookie('image_filter', 'custom');
 	window.location.reload();
 }
+function customTagListValidator() {
+	const to_submit = sanitizeTagList(this.value)
+	if (to_submit !== '') {
+		for (const w of to_submit.split(',')) {
+			if (!/[a-z:-]+/.test(w)) {
+				this.style.boxShadow = "0 0 4px 1px red"
+				custom_filter_button_e.disabled = true;
+				return
+			}
+		}
+	}
+	this.style.boxShadow = "inherit"
+	custom_filter_button_e.disabled = false;
+}
+superlist_e.addEventListener('input', customTagListValidator)
+whitelist_e.addEventListener('input', customTagListValidator)
+blacklist_e.addEventListener('input', customTagListValidator)
 
 function appendtext(s) {
 	desc_elem.value += s+' ';
