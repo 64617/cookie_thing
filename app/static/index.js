@@ -94,7 +94,7 @@ function customTagListValidator() {
 	const to_submit = sanitizeTagList(this.value)
 	if (to_submit !== '') {
 		for (const w of to_submit.split(',')) {
-			if (!/[a-z:-]+/.test(w)) {
+			if (!/^[a-z:-]+$/.test(w)) {
 				this.style.boxShadow = "0 0 4px 1px red"
 				custom_filter_button_e.disabled = true;
 				return
