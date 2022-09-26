@@ -3,7 +3,7 @@ function sanitizeTagList(s) {
 		.replace(/\s+/g,' ') // remove extra whitespaces
 		.replace(/^\s+|\s+$/,'') 
 		.replace(/^,|,$/g,'')  // extra: remove trailing/starting commas
-		.replace(', ', ',');
+		.replaceAll(', ', ',');
 }
   
 
