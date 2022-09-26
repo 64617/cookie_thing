@@ -24,7 +24,7 @@ def ip_hash(ip: str):
 
 # Connect to the database
 DB_CONN = psycopg.connect(
-    host = 'caption-db',
+    host = os.environ.get("DB_CONTAINER", 'caption-db'),
     port = 5432,
     dbname   = os.environ.get("POSTGRES_DATABASE", "derpibooru"),
     user     = os.environ.get("POSTGRES_USERNAME", "derpibooru_user"),
@@ -41,6 +41,17 @@ def add_cursor(f):
 with DB_CONN.cursor() as cur:
     res = cur.execute('''SELECT COUNT(id) FROM images''')
     REQUIRED = res.fetchone()[0]*2 # pyright: ignore
+    #
+    cur.execute('''
+        CREATE OR REPLACE FUNCTION tag_name_to_id (tag_name TEXT) RETURNS BIGINT AS $$
+          DECLARE tag_id BIGINT;
+          BEGIN
+            SELECT id INTO tag_id FROM tags
+            WHERE name = tag_name;
+            RETURN tag_id;
+          END;
+        $$ LANGUAGE plpgsql;
+    ''')
 
 class DurationOf:
     def __init__(self, title: str): self.s = title
@@ -94,8 +105,8 @@ class ImageQueue:
             ''', (ip_hash(ip), uid, idx, desc, new_pid))
 
     def get_next(self, session: str, superlist: str, whitelist: str, blacklist: str):
-        print('TODO:', superlist)
-        expected_filter = whitelist+blacklist
+        print(f'{session=}, {superlist=}, {whitelist=}, {blacklist=}')
+        expected_filter = superlist+whitelist+blacklist
         # if a user changed their filter, delete their image cache.
         if self.cached_filters[session] != expected_filter:
             self.cached_ids[session] = deque()
@@ -105,84 +116,85 @@ class ImageQueue:
         cache = self.cached_ids[session]
         if len(cache) < 2:
             with DurationOf('fill_cache()'):
-                self.fill_cache(session, whitelist, blacklist) # pyright: ignore
+                self.fill_cache(session, superlist, whitelist, blacklist) # pyright: ignore
                 print(cache)
         
         # pop from cache
         if not cache: return None
         return cache.popleft()
     @add_cursor
-    def fill_cache(self, cur, session: str, whitelist: str, blacklist: str):
+    def fill_cache(self, cur, session: str, superlist: str, whitelist: str, blacklist: str):
         '''Adds 100 images to the image cache for user `session`'''
         QUERY_LIMIT = 100
 
-        # SQL SELECT query with 6 parts:
-        sql = 'WITH'
+        # convert stringified tag lists to actual lists
+        slist,wlist,blist = [
+            [] if not s else s.split(',')
+            for s in (superlist,whitelist,blacklist)
+        ]
 
-        # 0. predefine variables (blacklist)
-        if blacklist:
-            sql += '''
-            bl as (
-              SELECT id FROM tags
-              WHERE name = ANY(%s)
-            ),
-            '''
+        # extract tag_name:tag_id pairs with a DB query
+        tags_used = set([*slist,*wlist,*blist])
+        # this doesn't need a transaction because the tags table should not change.
+        res = cur.execute('''
+            SELECT id, name FROM tags
+            WHERE name = ANY(%s)
+        ''', (list(tags_used),))
+        tag_name_to_id = {name:tag_id for tag_id,name in res.fetchall()}
+        def to_tag_ids(tag_names: List[str]):
+            return [tag_name_to_id[w] for w in tag_names]
 
-        # 1. Begin query on image_taggings table for distinct image_ids
-        sql += '''
-            possible_ids as (
-                SELECT DISTINCT ON (image_id) image_id FROM image_taggings
+
+        # Multi step SQL query.
+        # 0. selecting image_ids from image_taggings,
+        sql = '''
+          SELECT image_id FROM (
+            SELECT it.image_id FROM image_taggings it
         '''
 
-        # 2. filter for tags in whitelist
+        # 1. do an inner join with all entries in slist + once for whitelist,
+        for i in range(len(slist)+bool(whitelist)):
+            sql += f'INNER JOIN image_taggings it{i} on it{i}.image_id = it.image_id\n'
+
+        # 2. filter against images already prompted
+        # TODO: allow for images with caption count < x
+        sql += '''
+            WHERE it.image_id NOT IN (
+              SELECT image_id FROM image_prompts
+            )
+        '''
+
+        # 3. filter for all tags in superist, and any tag in whitelist
+        # note: for simplicity of programming we don't use `it` (the original) here
+        for i in range(len(slist)):
+            sql += f'AND it{i}.tag_id = %s\n'
         if whitelist:
-            sql += '''
-                WHERE tag_id IN (
-                  SELECT id from tags
-                    WHERE name = ANY(%s)
-                )
-            '''
+            sql += f'AND it{len(slist)}.tag_id = ANY(%s)\n'
 
-        # 3. filter against images that have prompts already
-        # TODO: figure out when to start filtering against prompt_id > 0
-        word = 'AND' if whitelist or blacklist else 'WHERE'
+        # 4. filter against blacklist tags, and also limit query output to unique image_id
+        sql += 'GROUP BY it.image_id\n'
+        sql += 'HAVING every(it.tag_id != ALL(%s))\n' \
+            if blist else 'HAVING TRUE\n'
+        
+        # 5. get query entries randomly.
+        # TODO: unfortunately this will do a full table scan (very slow). fixme
         sql += f'''
-                {word} image_id NOT IN (
-                  SELECT image_id FROM image_prompts
-                )
-            )
+          ) t
+          ORDER BY random() LIMIT {QUERY_LIMIT}
         '''
 
-        # 4. filter against tags from blacklist
-        # this entire query is basically a waste of time if there's no blacklist.
-        sql += '''
-            SELECT image_id from image_taggings
-            WHERE image_id IN (
-              SELECT image_id FROM possible_ids
-            )
-            GROUP BY image_id
-        '''
-        if blacklist: sql += '''
-            HAVING bool_and(tag_id NOT IN (
-              SELECT id FROM bl
-            ))
-            '''
-        else: sql += '''
-            HAVING TRUE
-        '''
-
-        # 5. get the first 100 images randomly from that query.
-        # TODO: alt-path for when the database "runs out" and returns < QUERY_LIMIT entries
-        sql += f'''
-            ORDER BY random() LIMIT {QUERY_LIMIT}
-        '''
         # execute query
-        print(f'{whitelist=},{blacklist=}')
+        print(f'{superlist=}, {whitelist=}, {blacklist=}')
         print(sql)
-        res = cur.execute(sql, tuple(
-            ls.split(',')
-            for ls in (blacklist, whitelist)
-            if ls
+        print((
+            *to_tag_ids(slist),
+            to_tag_ids(wlist),
+            to_tag_ids(blist),
+        ))
+        res = cur.execute(sql, (
+            *to_tag_ids(slist),
+            to_tag_ids(wlist),
+            to_tag_ids(blist),
         ))
         # add result to cached ID list
         self.cached_ids[session].extend(
