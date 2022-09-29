@@ -189,16 +189,12 @@ class ImageQueue:
         # execute query
         print(f'{superlist=}, {whitelist=}, {blacklist=}')
         print(sql)
-        print((
-            *to_tag_ids(slist),
-            to_tag_ids(wlist),
-            to_tag_ids(blist),
-        ))
-        res = cur.execute(sql, (
-            *to_tag_ids(slist),
-            to_tag_ids(wlist),
-            to_tag_ids(blist),
-        ))
+        #
+        args = to_tag_ids(slist)
+        if whitelist: args.append(to_tag_ids(wlist))
+        if blacklist: args.append(to_tag_ids(blist))
+        print(args)
+        res = cur.execute(sql, args)
         # add result to cached ID list
         self.cached_ids[session].extend(
             (t[0] for t in res.fetchall())
@@ -230,7 +226,15 @@ def index():
         superlist,whitelist,blacklist = DEFAULT_FILTERS[typ]
     
     # return front page with image
-    idx = iq.get_next(str(session), superlist, whitelist, blacklist)
+    try: 
+        idx = iq.get_next(str(session), superlist, whitelist, blacklist)
+    except RuntimeError as e:
+        resp = make_response(str(e), 500)
+        resp.delete_cookie('superlist')
+        resp.delete_cookie('whitelist')
+        resp.delete_cookie('blacklist')
+        return resp
+
     if idx is None:
         resp = make_response('Could not find any images matching your query. (possible bug?)', 500)
         resp.delete_cookie('superlist')
