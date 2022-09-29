@@ -39,9 +39,11 @@ def add_cursor(f):
     return inner
 
 with DB_CONN.cursor() as cur:
+    # get total number of images
     res = cur.execute('''SELECT COUNT(id) FROM images''')
     REQUIRED = res.fetchone()[0]*2 # pyright: ignore
-    #
+
+    # Create a helper function in SQL to convert tag names to tag ids
     cur.execute('''
         CREATE OR REPLACE FUNCTION tag_name_to_id (tag_name TEXT) RETURNS BIGINT AS $$
           DECLARE tag_id BIGINT;
@@ -52,6 +54,13 @@ with DB_CONN.cursor() as cur:
           END;
         $$ LANGUAGE plpgsql;
     ''')
+
+    # Create a prepared statement for JSON dumping. Hotfix for a bug.
+    cur.execute('''
+        PREPARE jsondumpplan AS
+          SELECT * FROM image_prompts
+    ''')
+
 
 class DurationOf:
     def __init__(self, title: str): self.s = title
@@ -273,7 +282,7 @@ def create_backup():
     Timer(60*60*6, create_backup).start()
     # create JSON dump cache
     with DB_CONN.cursor() as cur, DurationOf("JSON dump"):
-        res = cur.execute('SELECT * FROM image_prompts')
+        res = cur.execute('execute jsondumpplan')
         captions = [
             dict(zip(
                 ('ip_hash', 'session_id', 'prompt_text', 'prompt_id', 'image_id'),
