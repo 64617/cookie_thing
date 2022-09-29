@@ -141,6 +141,9 @@ class ImageQueue:
             WHERE name = ANY(%s)
         ''', (list(tags_used),))
         tag_name_to_id = {name:tag_id for tag_id,name in res.fetchall()}
+        # check for missing tags
+        if len(tag_name_to_id) != len(tags_used):
+            raise RuntimeError(f"The following tags were not found: {tags_used - set(tag_name_to_id)}")
         def to_tag_ids(tag_names: List[str]):
             return [tag_name_to_id[w] for w in tag_names]
 
