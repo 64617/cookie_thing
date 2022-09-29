@@ -217,7 +217,7 @@ def index():
         session['uid'] = uuid.uuid4()
 
     # get whitelist/blacklist from cookies
-    typ = request.cookies.get("image_filter", "any")
+    typ = request.cookies.get("image_filter", "SAFE")
     if typ == 'custom':
         superlist = request.cookies.get("superlist", "")
         whitelist = request.cookies.get("whitelist", "")

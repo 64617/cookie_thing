@@ -49,7 +49,7 @@ function eraseCookie(name) {
 }
 
 if (getCookie('image_filter') === null) {
-	setCookie('image_filter', 'any', 99)
+	setCookie('image_filter', 'SAFE', 99)
 }
 const image_filter = getCookie('image_filter')
 const FILTER_LIST = ["SAFE", "any", "NSFW", "NSFL", "PONY", "custom"]
@@ -94,7 +94,7 @@ function customTagListValidator() {
 	const to_submit = sanitizeTagList(this.value)
 	if (to_submit !== '') {
 		for (const w of to_submit.split(',')) {
-			if (!/^[a-z:-]+$/.test(w)) {
+			if (!/^[0-9 a-z:-]+$/.test(w)) {
 				this.style.boxShadow = "0 0 4px 1px red"
 				custom_filter_button_e.disabled = true;
 				return
