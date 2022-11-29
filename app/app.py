@@ -102,6 +102,7 @@ class ImageQueue:
 
     @add_cursor
     def write_desc(self, cur, idx: int, desc: str, uid: str, ip: str):
+        print(f'Log /api/submit - {uid=} {ip=} {idx=}')
         # use a transaction to ensure atomic prompt_id counting
         with DB_CONN.transaction():
             # get number of prompts so far
@@ -132,14 +133,18 @@ class ImageQueue:
             with DurationOf('fill_cache()'):
                 self.fill_cache(session, superlist, whitelist, blacklist) # pyright: ignore
                 print(cache)
-        
+
         # pop from cache
         if not cache: return None
         return cache.popleft()
     @add_cursor
-    def fill_cache(self, cur, session: str, superlist: str, whitelist: str, blacklist: str):
-        '''Adds 100 images to the image cache for user `session`'''
-        QUERY_LIMIT = 100
+    def filtered_query(
+        self, cur,
+        superlist: str, whitelist: str, blacklist: str,
+        QUERY_LIMIT: int=100, ip_filter: Optional[str]=None, unprompted: bool=True
+    ):
+        '''Queries the database (randomly) for images based on the given filters,
+        returning QUERY_LIMIT image IDs.'''
 
         # convert stringified tag lists to actual lists
         slist,wlist,blist = [
@@ -161,7 +166,19 @@ class ImageQueue:
         def to_tag_ids(tag_names: List[str]):
             return [tag_name_to_id[w] for w in tag_names]
 
+        sql = self.filtered_query_build(slist, wlist, blist, QUERY_LIMIT, ip_filter, unprompted)
+        print(sql)
+        #
+        args = to_tag_ids(slist)
+        if ip_filter: args.append(ip_filter)
+        if wlist: args.append(to_tag_ids(wlist))
+        if blist: args.append(to_tag_ids(blist))
+        print(args)
+        res = cur.execute(sql, args)
+        return (t[0] for t in res.fetchall())
 
+
+    def filtered_query_build(self, slist: List[str], wlist: List[str], blist: List[str], QUERY_LIMIT: int, ip_filter: Optional[str], unprompted: bool):
         # Multi step SQL query.
         # 0. selecting image_ids from image_taggings,
         sql = '''
@@ -170,49 +187,48 @@ class ImageQueue:
         '''
 
         # 1. do an inner join with all entries in slist + once for whitelist,
-        for i in range(len(slist)+bool(whitelist)):
+        for i in range(len(slist)+bool(wlist)):
             sql += f'INNER JOIN image_taggings it{i} on it{i}.image_id = it.image_id\n'
 
         # 2. filter against images already prompted
         # TODO: allow for images with caption count < x
-        sql += '''
-            WHERE it.image_id NOT IN (
+        subquery = '''
               SELECT image_id FROM image_prompts
-            )
+              WHERE ip_hash = %s
+        ''' if ip_filter else '''
+              SELECT image_id FROM image_prompts
+        '''
+        sql += f'''
+            WHERE it.image_id {'NOT ' if unprompted else ''}IN ({subquery})
         '''
 
         # 3. filter for all tags in superist, and any tag in whitelist
         # note: for simplicity of programming we don't use `it` (the original) here
         for i in range(len(slist)):
             sql += f'AND it{i}.tag_id = %s\n'
-        if whitelist:
+        if wlist:
             sql += f'AND it{len(slist)}.tag_id = ANY(%s)\n'
 
         # 4. filter against blacklist tags, and also limit query output to unique image_id
         sql += 'GROUP BY it.image_id\n'
         sql += 'HAVING every(it.tag_id != ALL(%s))\n' \
             if blist else 'HAVING TRUE\n'
-        
+
         # 5. get query entries randomly.
         # TODO: unfortunately this will do a full table scan (very slow). fixme
         sql += f'''
           ) t
           ORDER BY random() LIMIT {QUERY_LIMIT}
         '''
+        return sql
 
-        # execute query
+    def fill_cache(self, session: str, superlist: str, whitelist: str, blacklist: str):
+        '''Adds 100 images to the image cache for user `session`'''
         print(f'{superlist=}, {whitelist=}, {blacklist=}')
-        print(sql)
-        #
-        args = to_tag_ids(slist)
-        if whitelist: args.append(to_tag_ids(wlist))
-        if blacklist: args.append(to_tag_ids(blist))
-        print(args)
-        res = cur.execute(sql, args)
+
         # add result to cached ID list
-        self.cached_ids[session].extend(
-            (t[0] for t in res.fetchall())
-        )
+        id_gen = self.filtered_query(superlist, whitelist, blacklist) # pyright: ignore
+        self.cached_ids[session].extend(id_gen)
 
 iq = ImageQueue()
 
