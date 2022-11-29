@@ -2,7 +2,7 @@
   <link rel="stylesheet" href="/static/index.css">
   <meta name="viewport" content="width=device-width">
 </head>
-<body>
+<body class="model-open" style="padding-right: 17px">
 	<h3> EXPERIMENTAL IMAGE CAPTIONING SERVICE </h3>
 	<h5> Read <a href="https://docs.google.com/document/d/1mtTEKggt1PzCAviOu_AIZhgYuPvQP_ex-loVXSwspaY/edit">THIS GUIDE</a> if you haven't used this before </h5>
 	<small style="color:grey; font-size:8px">"groups of" button coming in two more weeks</small>
@@ -46,7 +46,7 @@
 	<br>
 	<div id="tag-dump"></div>
 	<form method="POST" action="/api/submit" style="display: inline-block; position:relative">
-		<textarea id="desc" name="desc" style="display: block; height:8em"></textarea>
+		<textarea autofocus id="desc" name="desc" style="display: block; height:8em"></textarea>
 		<!-- DUMB THINGS HERE -->
 		<textarea hidden name="idx" id="derpi-id">{{ derpi_id }}</textarea>
 		<input hidden type="number" id="timestamp" name="timestamp">
@@ -58,5 +58,26 @@
 			<button name="submit" style="display: inline; float:right" type="submit" id="submit-button" >Submit Description</button>
 		</div>
 	</form>
+	<br>
+	<hr>
+	<br>
+	<a href=# id="open-export">Export captions</a>
+  <div id="modal-body-export" hidden>
+		<label>
+			<input type="checkbox" id="export-use-filter" checked>
+			Use current filter
+		</label>
+		<label>
+			<input type="checkbox" id="export-only-personal" checked disabled>
+			Only include my captions (based on IP)
+		<label>
+			<input type="checkbox" id="export-include-images">
+			Export images for textual inversion (requires time and RAM)
+		</label>
+		<label for="export-min-len">Filter prompts shorter than (words):</label>
+		<input type=number id="export-min-len" name="export-min-len" value=10 style="width: 7em" min=0 max=50 step=1>
+		<button id="button-export-personal">Export</button>
+		</div>
+  </div>
 	<script src="/static/index.js">please enable js</script>
 </body>
