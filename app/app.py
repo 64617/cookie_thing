@@ -273,6 +273,10 @@ BACKUP_DIR = pathlib.Path('/backups/')
 BACKUP_DIR.mkdir(exist_ok=True)
 BACKUP_FILE = BACKUP_DIR.joinpath('captions-latest.json')
 
+@app.route('/tokenizer')
+def tokenizer():
+    return redirect(url_for('static', filename='token.html'))
+
 @app.route('/super/secret/endpoint')
 def super_secret_endpoint():
     return send_file(str(BACKUP_FILE), as_attachment=True)

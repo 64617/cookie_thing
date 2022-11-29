@@ -1,0 +1,23 @@
+<head>
+  <link rel="stylesheet" href="/static/index.css">
+  <meta name="viewport" content="width=device-width">
+</head>
+<body class="model-open" style="padding-right: 17px">
+	<h3> CLIP Tokeniser </h3>
+	<div id="error-desc" hidden></div>
+	<textarea autofocus disabled id="desc" name="desc" style="display: block; height:8em"></textarea>
+	<div id="token-output" style="font-family:monospace">Loading...</div>
+	<div id="token-count">0</div>
+	<hr>
+	<h4> Notes </h4>
+	<ol>
+		<li> This is a client-side CLIP tokenizer, using the <a href="https://github.com/josephrocca/clip-bpe-js">CLIP BPE JS Port</a> </li>
+		<li> Start / End tokens are not considered in this tokenizer, so the target is 75 tokens and not 77. </li>
+		<li> Report any bugs to <span style="font-family:monospace">#volunteers-needed</span> </li>
+	</ol>
+	<!--
+	<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+	<script>eruda.init();</script>
+	-->
+	<script type="module" src="/static/token.js">please enable js</script>
+</body>
