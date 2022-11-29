@@ -60,10 +60,30 @@ with DB_CONN.cursor() as cur:
         $$ LANGUAGE plpgsql;
     ''')
 
+    # create table of bad users/ips
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS bad_IPs (
+            banned text,
+            PRIMARY KEY (banned)
+        );
+        CREATE TABLE IF NOT EXISTS bad_sessions (
+            banned text,
+            PRIMARY KEY (banned)
+        );
+    ''')
+
     # Create a prepared statement for JSON dumping. Hotfix for a bug.
     cur.execute('''
-        PREPARE jsondumpplan AS
+        PREPARE jsondumpplan AS (
           SELECT * FROM image_prompts
+          WHERE NOT EXISTS (
+            SELECT banned FROM bad_sessions
+            WHERE banned = session_id
+          ) AND NOT EXISTS (
+            SELECT banned FROM bad_IPs
+            where banned = ip_hash
+          )
+        )
     ''')
 
 
@@ -320,6 +340,29 @@ def tokenizer():
 @app.route('/super/secret/endpoint')
 def super_secret_endpoint():
     return send_file(str(BACKUP_FILE), as_attachment=True)
+
+@add_cursor_noself
+def add_ban(cur, *, ip: Optional[str]=None, sess: Optional[str]=None):
+    if ip is not None:
+        cur.execute('''
+            INSERT INTO bad_IPs (banned)
+            VALUES (%s)
+        ''', (ip,))
+    elif sess is not None:
+        cur.execute('''
+            INSERT INTO bad_sessions (banned)
+            VALUES (%s)
+        ''', (sess,))
+    else: raise RuntimeError
+
+@app.route('/add/banned/users', methods=['POST'])
+def secert_ban_page():
+    typ,ban,pw = [request.form[k] for k in ('type','ban','pass')]
+    if pw != 'haha yes i am hardcoding passwords' or \
+            typ not in ('ip', 'sess'):
+        return 'who the fuck are you', 403
+    add_ban(**{typ: ban})
+    return redirect('/static/temp_ban_page.html', code=302)
 
 def create_backup():
     # call this recursively every 6 hours
