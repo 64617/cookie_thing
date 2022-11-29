@@ -8,9 +8,9 @@ from subprocess import check_call
 from threading import Timer
 from hashlib import pbkdf2_hmac
 from collections import defaultdict, deque
-from flask import Flask,render_template,request,redirect,send_file,session,make_response
+from flask import Flask,render_template,request,redirect,send_file,session,make_response,jsonify,redirect,url_for
 from tqdm import tqdm
-from typing import List,Set,Tuple
+from typing import List,Set,Tuple,Optional
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ["FLASK_SECRET_KEY"] #NOTE: IF YOU EVER MAKE CHANGES TO THE SESSION HANDLING CODE, YOU NEED TO CHANGE THIS (or purge all sessions somehow otherwise)
@@ -32,6 +32,11 @@ DB_CONN = psycopg.connect(
     autocommit=True
 )
 
+def add_cursor_noself(f):
+    def inner(*args, **kwargs):
+        with DB_CONN.cursor() as cur:
+            return f(cur, *args, **kwargs)
+    return inner
 def add_cursor(f):
     def inner(self, *args, **kwargs):
         with DB_CONN.cursor() as cur:
@@ -219,37 +224,40 @@ DEFAULT_FILTERS = {
     'PONY': ('', 'pony', 'eqg,human,anthro')
 }
 
+def find_filters(cookies) -> Tuple[str,str,str]:
+    # get whitelist/blacklist from cookies
+    typ = cookies.get("image_filter", "SAFE")
+    if typ == 'custom':
+        superlist = cookies.get("superlist", "")
+        whitelist = cookies.get("whitelist", "")
+        blacklist = cookies.get("blacklist", "")
+    else:
+        superlist,whitelist,blacklist = DEFAULT_FILTERS[typ]
+    return superlist, whitelist, blacklist
+
+def error_avoiding_deadlock(res: str):
+    resp = make_response(res, 500)
+    for cook in ['superlist', 'whitelist', 'blacklist']:
+        resp.delete_cookie(cook)
+    return resp
+
 @app.route("/")
 def index():
     # handle sessions
     if 'uid' not in session: # There is nothing stopping someone from clearing cookies and spawning more sessions. 
         session['uid'] = uuid.uuid4()
 
-    # get whitelist/blacklist from cookies
-    typ = request.cookies.get("image_filter", "SAFE")
-    if typ == 'custom':
-        superlist = request.cookies.get("superlist", "")
-        whitelist = request.cookies.get("whitelist", "")
-        blacklist = request.cookies.get("blacklist", "")
-    else:
-        superlist,whitelist,blacklist = DEFAULT_FILTERS[typ]
-    
+    superlist,whitelist,blacklist = find_filters(request.cookies)
+
     # return front page with image
-    try: 
+    try:
         idx = iq.get_next(str(session), superlist, whitelist, blacklist)
     except RuntimeError as e:
-        resp = make_response(str(e), 500)
-        resp.delete_cookie('superlist')
-        resp.delete_cookie('whitelist')
-        resp.delete_cookie('blacklist')
-        return resp
-
+        return error_avoiding_deadlock(str(e))
     if idx is None:
-        resp = make_response('Could not find any images matching your query. (possible bug?)', 500)
-        resp.delete_cookie('superlist')
-        resp.delete_cookie('whitelist')
-        resp.delete_cookie('blacklist')
-        return resp
+        return error_avoiding_deadlock('Could not find any images matching your query. (possible bug?)')
+
+    print(f"Log / - Rendering {idx}")
     return render_template('index.html', derpi_id=idx,
        progress=iq.progress_str())
 
@@ -268,6 +276,22 @@ def submit():
         return 'RESPONSE TOO SHORT / LONG', 500
     iq.write_desc(idx, desc, uid, ip) # pyright: ignore
     return redirect('/', code=302)
+
+@app.route('/api/collect/<int:use_filter>')
+def collect(use_filter: int):
+    ip = request.headers['Cf-Connecting-Ip']
+    prompts = get_prompts_of_user(ip_hash(ip), bool(use_filter)) # pyright: ignore
+    return jsonify(prompts)
+
+@add_cursor_noself
+def get_prompts_of_user(cur, ip_h: str, use_filter: bool):
+    superlist,whitelist,blacklist = find_filters(request.cookies) if use_filter else ('','','')
+    image_ids = iq.filtered_query(superlist, whitelist, blacklist, 99999999, ip_h, False) # pyright: ignore
+    res = cur.execute('''
+        SELECT image_id, prompt_text FROM image_prompts
+        WHERE image_id = ANY(%s)
+    ''', (list(image_ids),))
+    return res.fetchall()
 
 BACKUP_DIR = pathlib.Path('/backups/')
 BACKUP_DIR.mkdir(exist_ok=True)
