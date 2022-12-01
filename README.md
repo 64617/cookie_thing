@@ -3,17 +3,16 @@
 two options to run
 
 ## unsafe development and so on
+#### this will not work without postgresql db installed outside
 ```bash
 cd app
 uwsgi --ini uwsgi.ini
 ```
+
 ## docker
-##### don't actually try using this because it's out of date
-In `docker-compose.yml`, replace 
-```
-device: /REPLACE_ME/PATH/TO/output_descriptions
-```
-with wherever you want the image descriptions to be stored. Then run:
+1. Replace all `REPALCE_ME` constants in docker-compose.example.yml
+2. rename it to `docker-compose.yml`
+3. 
 ```bash
 docker-compose build
 docker-compose up -d
@@ -24,18 +23,9 @@ access the site at http://localhost:5000
 
 it will also be fully exposed to the internet at `<your-ip>:5000`.
 
-outputs will be written to `output_descriptions/`, which will be in the `app/` folder if you run without docker.
+outputs will go to postgresql db somehow
 
-Example contents:
-```bash
-$ tree ../output_descriptions
-../output_descriptions
-...
-├── 61
-│   ├── 0.txt
-│   └── 1.txt
-...
-```
+backup system is outside of the scope of this repo
 
 ## bugs
 literally millions of them. good luck
