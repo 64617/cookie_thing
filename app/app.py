@@ -22,6 +22,9 @@ assert len(IP_SALT) == 16
 def ip_hash(ip: str):
     return pbkdf2_hmac('sha256', ip.encode(), IP_SALT, PBKDF2_ITERS).hex()
 
+SECRET_BACKUP_ENDPOINT = os.environ["SECRET_BACKUP_ENDPOINT"]
+SECRET_BAN_PASSWORD = os.environ["SECRET_BAN_PASSWORD"]
+
 # Connect to the database
 DB_CONN = psycopg.connect(
     host = os.environ.get("DB_CONTAINER", 'caption-db'),
@@ -337,7 +340,7 @@ BACKUP_FILE = BACKUP_DIR.joinpath('captions-latest.json')
 def tokenizer():
     return redirect(url_for('static', filename='token.html'))
 
-@app.route('/super/secret/endpoint')
+@app.route(SECRET_BACKUP_ENDPOINT)
 def super_secret_endpoint():
     return send_file(str(BACKUP_FILE), as_attachment=True)
 
@@ -358,7 +361,7 @@ def add_ban(cur, *, ip: Optional[str]=None, sess: Optional[str]=None):
 @app.route('/add/banned/users', methods=['POST'])
 def secert_ban_page():
     typ,ban,pw = [request.form[k] for k in ('type','ban','pass')]
-    if pw != 'haha yes i am hardcoding passwords' or \
+    if pw != SECRET_BAN_PASSWORD or \
             typ not in ('ip', 'sess'):
         return 'who the fuck are you', 403
     add_ban(**{typ: ban})
