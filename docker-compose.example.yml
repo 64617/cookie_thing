@@ -1,0 +1,44 @@
+version: '3'
+
+volumes:
+  db-data:
+
+services:
+  db:
+    image: postgres:14-alpine
+    container_name: caption-db
+    shm_size: '1gb'
+    restart: always
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=REPLACE_ME
+      - POSTGRES_USER=root
+      - POSTGRES_DB=derpibooru
+  adminer:
+    image: adminer
+    container_name: caption-adminer
+    restart: "unless-stopped"
+    ports:
+      - 127.0.0.1:8080:8080
+
+  cookie-thing:
+    build:
+      context: .
+    restart: always
+    environment:
+      - FLASK_ENV=production
+      - FLASK_SECRET_KEY=REPLACE_ME
+      - IP_SALT=REPLACE_ME
+      - POSTGRES_PASSWORD=REPLACE_ME
+      - POSTGRES_USERNAME=root
+      - SECRET_BACKUP_ENDPOINT=REPLACE_ME
+      - SECRET_BAN_PASSWORD=REPLACE_ME
+    ports:
+      - 127.0.0.1:5000:5000
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: '8G'
+
