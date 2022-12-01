@@ -186,7 +186,7 @@ async function showImage() {
 		error_e.hidden = false
 	}
 }
-//showImage();
+showImage();
 
 function checkWordLen() {
 	const s = desc_elem.value.trim()
